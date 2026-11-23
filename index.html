@@ -598,7 +598,7 @@ for (let i = 0; i < 16; i++) {
 const G = { state: 'title', s: 260, d: 0, v: 62, vd: 0, steer: 0, lives: 3, score: 0, combo: 0, comboT: 0, crashT: 0, shake: 0, imp: 0, runS: 260, tod: .2, todOverride: null,
   rain: 0, nitro: .35, boost: false, boostK: 0, photo: false, mute: false, st: { cc: 0, maxCombo: 0, maxV: 0 }, lights: false, lightsAuto: true, camMode: 0, best: 0, zone: -1, zoneT: 0, pops: [], scrape: 0, simT: 0, cin: 0, lightsK: 0, boil: true };
 try { G.best = +(localStorage.getItem('afterglow_best') || 0); G.mute = localStorage.getItem('afterglow_mute') === '1'; } catch (e) {}
-const MAXV = 330 / 3.6, MAXV_B = 368 / 3.6;
+const MAXV = (CAP ? 330 : 250) / 3.6, MAXV_B = (CAP ? 368 : 290) / 3.6;
 const ZONES = ['SUNSET CAUSEWAY', 'CORAL KEYS', 'PELICAN STRAIT', 'PINK MOTEL', 'LONG BRIDGE', 'NEON BAY', 'MIDNIGHT PIER', 'STARLIGHT RUN'];
 function laneD(l) { return (l - 1) * LANE; }
 function spawnCar(c, sMin, span) {
@@ -612,7 +612,8 @@ function resetWorld(seed) {
   rnd = mulberry(seed); G._tgt = null; camD = 0; Object.assign(G, { s: 260, d: 0, v: 62, vd: 0, steer: 0, runS: 260, combo: 0, comboT: 0, crashT: 0, shake: 0, imp: 0, pops: [], scrape: 0, simT: 0 });
   traffic.forEach(c => { c.on = false; c.forced = false; c.forcedShot = -1; }); traffic.forEach((c, i) => { if (i < 10) spawnCar(c, G.s + 60, 900); });
 }
-function startRun() { Object.assign(G, { state: 'play', todOverride: null, lives: 3, score: 0, combo: 0, comboT: 0, crashT: 1, runS: G.s, zone: -1, pops: [], nitro: .35, boost: false, photo: false, st: { cc: 0, maxCombo: 0, maxV: 0 } }); initSound(); traffic.forEach(c => { if (c.on && c.s - G.s > -10 && c.s - G.s < 160) c.on = false; }); G.v = Math.max(G.v, 40);
+function startRun() { if (!CAP) { G.v = 0; G.vd = 0; G.steer = 0; G.accS = 0; traffic.forEach(c => { if (c.on && c.s - G.s > -40 && c.s - G.s < 320) c.on = false; }); }
+  Object.assign(G, { state: 'play', todOverride: null, lives: 3, score: 0, combo: 0, comboT: 0, crashT: 1, runS: G.s, zone: -1, pops: [], nitro: .35, boost: false, photo: false, st: { cc: 0, maxCombo: 0, maxV: 0 } }); initSound(); if (CAP) { traffic.forEach(c => { if (c.on && c.s - G.s > -10 && c.s - G.s < 160) c.on = false; }); G.v = Math.max(G.v, 40); }
   document.getElementById('title').classList.add('hide'); document.getElementById('over').classList.add('hide'); }
 function endRun() { G.state = 'over'; const sc = Math.floor(G.score); if (sc > G.best) { G.best = sc; try { localStorage.setItem('afterglow_best', String(sc)); } catch (e) {} }
   const km = ((G.s - G.runS) / 1000).toFixed(1), newBest = sc >= G.best && sc > 0;
@@ -692,14 +693,14 @@ function initSound() { if (CAP) return;
   for (const k in SFX) AC.decodeAudioData(b64buf(SFX[k]), buf => { SND.buf[k] = buf; if (k === 'rev') oneShot('rev', .35, 1);
     if (FXL[k]) { const sc = AC.createBufferSource(), g = N('g', { gain: 0 }); sc.buffer = buf; sc.loop = true; sc.loopStart = 0; sc.loopEnd = FXL[k]; sc.connect(g); g.connect(k === 'squeal' ? SND.fx : SND.amb); sc.start(0, Math.random() * FXL[k] * .9); SND.loops[k] = { sc, g }; } }, () => {});
 }
-const GEARS = [0, 62, 108, 155, 205, 262, 999], RPM_LO = 3400, RPM_HI = 6000;
+const GEARS = CAP ? [0, 62, 108, 155, 205, 262, 999] : [0, 50, 86, 122, 162, 206, 999], GTOP = CAP ? 380 : 300, RPM_LO = 3400, RPM_HI = 6000;
 function updateSound(gasOn, dt) { if (!SND) return; const t = AC.currentTime, kmh = G.v * 3.6; let gi = 0; while (kmh > GEARS[gi + 1]) gi++;
   const play = G.state === 'play', on = !G.mute && !G.photo && G.state !== 'title' && !document.hidden;
   if (gi !== SND.gear) { if (gi > SND.gear && play) SND.shiftT = t; SND.gear = gi; }
   if (G.lives < SND.lives) SND.crashT = t; SND.lives = G.lives;
   if (G.boost && !SND.boost) oneShot('rev', .42, 1.04); SND.boost = G.boost;
   const gas = (gasOn || G.boost) && play; if (SND.gas && !gas) SND.liftT = t; SND.gas = gas;
-  const fr = clamp((kmh - GEARS[gi]) / ((gi === 5 ? 380 : GEARS[gi + 1]) - GEARS[gi]), 0, 1);
+  const fr = clamp((kmh - GEARS[gi]) / ((gi === 5 ? GTOP : GEARS[gi + 1]) - GEARS[gi]), 0, 1);
   const crash = clamp(1 - (t - SND.crashT) / .8, 0, 1), shift = clamp(1 - (t - SND.shiftT) / .15, 0, 1), lift = clamp(1 - (t - SND.liftT) / .7, 0, 1);
   const target = (kmh < 4 ? 1000 : gi === 0 ? 1900 + fr * (RPM_HI - 1900) : RPM_LO + fr * (RPM_HI - RPM_LO)) + G.boostK * 300;
   SND.rpm += (target * (1 - crash * .4) - SND.rpm) * (1 - Math.exp(-dt * (shift > 0 ? 30 : 12)));
@@ -754,7 +755,7 @@ function autopilot() {
   if (cur < 70) { let best = G._tgt, bv = cur; for (const l of [G._tgt - 1, G._tgt + 1]) if (l >= 0 && l <= 2) { const v = clear(l); if (v > bv + 10) { bv = v; best = l; } } G._tgt = best; }
   const steer = clamp((laneD(G._tgt) - G.d) * .55 - G.vd * .08, -1, 1);
   const ahead = clear(G._tgt);
-  return { steer, gas: ahead > 26 || G.v < 30, brake: ahead < 16 && G.v > 30, cruise: CAP ? 72 + 8 * Math.sin(G.simT * .45) : 68 };
+  return { steer, gas: ahead > 26 || G.v < 30, brake: ahead < 16 && G.v > 30, cruise: CAP ? 72 + 8 * Math.sin(G.simT * .45) : 46 };
 }
 function step(dt) {
   G.simT += dt;
@@ -769,14 +770,16 @@ function step(dt) {
   if (playing && !CAP) { G.nitro = clamp(G.nitro + (G.boost ? -dt * .27 : dt * .012), 0, 1); }
   G.boostK += ((G.boost ? 1 : 0) - G.boostK) * (1 - Math.exp(-dt * 6));
   G.steer += (steer - G.steer) * (1 - Math.exp(-dt * (Math.abs(steer) > Math.abs(G.steer) ? 9 : 12)));
-  let acc = -1.5 - .00055 * G.v * G.v;
-  if (gas && G.v < cruise) acc += 13 * Math.pow(Math.max(0, 1 - G.v / MAXV), .55) + 1.8;
-  if (G.boost) acc += 10 + 14 * Math.max(0, 1 - G.v / MAXV_B); else if (G.v > MAXV) acc -= 6;
-  if (brake) acc -= 24;
+  let acc = CAP ? -1.5 - .00055 * G.v * G.v : -.5 - .00045 * G.v * G.v;
+  if (gas && G.v < cruise) acc += CAP ? 13 * Math.pow(Math.max(0, 1 - G.v / MAXV), .55) + 1.8 : 8.6 * Math.pow(Math.max(0, 1 - G.v / MAXV), .6) + .9;
+  if (!CAP && playing && !gas && !G.boost) acc -= 1.3;  // engine braking off the throttle
+  if (G.boost) acc += CAP ? 10 + 14 * Math.max(0, 1 - G.v / MAXV_B) : 6 + 8 * Math.max(0, 1 - G.v / MAXV_B); else if (G.v > MAXV) acc -= 6;
+  G.accS = (G.accS || 0) + (acc - (G.accS || 0)) * (1 - Math.exp(-dt * 4));
+  if (brake) acc -= CAP ? 24 : 12.5;
   G.v = clamp(G.v + acc * dt, 0, MAXV_B);
-  const vdMax = 3.5 + G.v * .075;
+  const vdMax = CAP ? 3.5 + G.v * .075 : 2.4 + G.v * .045;
   const r = road(G.s); const kap = kappa(G.s);
-  G.vd += (G.steer * vdMax - G.vd) * (1 - Math.exp(-dt * 7));
+  G.vd += (G.steer * vdMax - G.vd) * (1 - Math.exp(-dt * (CAP ? 7 : 4)));
   const drift = kap * G.v * G.v * .010;
   G.d += (G.vd + drift) * dt;
   G.scrape = Math.max(0, G.scrape - dt * 3);
@@ -819,7 +822,7 @@ const _sv = new THREE.Vector3();
 function shotCam(id, t, out) {
   const s = G.s, d = G.d, side = d > .5 ? -1 : 1;
   switch (id) {
-    case 'chase': { const por = camera.aspect < 1, back = (por ? 4.6 : 5.3) + G.v * .012; camD += (d - camD) * .12; P(s - back, camD * .85, (por ? 2.1 : 1.7) + G.v * .003, out.pos); P(s + 8, d * .8, por ? .1 : .85, out.look); out.fov = (por ? 74 : 56) + G.v / MAXV * 16; break; }
+    case 'chase': { const por = camera.aspect < 1, back = CAP ? (por ? 4.6 : 5.3) + G.v * .012 : (por ? 4.9 : 5.6) + G.v * .006; camD += (d - camD) * .12; P(s - back, camD * .85, CAP ? (por ? 2.1 : 1.7) + G.v * .003 : (por ? 2.05 : 1.62) + G.v * .0015, out.pos); P(s + 8, d * .8, por ? .1 : .85, out.look); out.fov = CAP ? (por ? 74 : 56) + G.v / MAXV * 16 : (por ? 70 : 52) + Math.min(1, G.v / MAXV) * 7; break; }
     case 'sun_rear': { const r = P(s, d, 0, _sv), rt = road(s).t; const k = Math.hypot(sunDir.x, sunDir.z) || 1;
       let ang = Math.atan2(sunDir.x / k, sunDir.z / k) - rt; ang = Math.atan2(Math.sin(ang), Math.cos(ang)); ang = clamp(ang, -.32, .32);
       const la = rt + clamp(ang, -.24, .24), bk = 12 - t * .5;
@@ -855,7 +858,7 @@ function updateCamera(dt, override) {
   camera.position.copy(camPos);
   if (G.shake > 0) { const k = G.shake * .18, tt = G.simT * 60; camera.position.x += (hr(tt, 1) - .5) * k; camera.position.y += (hr(tt, 2) - .5) * k; }
   camera.lookAt(camLook);
-  shot.fov += G.boostK * (id === 'chase' ? 12 : id === 'hood' ? 10 : 0);
+  shot.fov += G.boostK * (id === 'chase' ? 6 : id === 'hood' ? 5 : 0);
   camera.fov += (shot.fov - camera.fov) * (smooth ? 1 - Math.exp(-dt * 3) : 1); camera.updateProjectionMatrix();
 }
 
@@ -894,7 +897,7 @@ function placeCar(dt) {
   car.root.position.copy(pos);
   const yawOff = Math.atan2(G.vd, Math.max(G.v, 5)) * .9;
   car.root.rotation.set(-Math.atan(elevD(G.s)), r.t + yawOff, 0, 'YXZ');
-  car.body.rotation.z = -G.steer * .035 * (G.v / MAXV) - G.vd * .004; car.body.rotation.x = 0;
+  car.body.rotation.z = CAP ? -G.steer * .035 * (G.v / MAXV) - G.vd * .004 : -G.steer * .06 * Math.min(1, G.v / MAXV) - G.vd * .007; car.body.rotation.x = CAP ? 0 : clamp(-(G.accS || 0) * .0035, -.035, .03);
   car.body.position.y = Math.sin(G.simT * 31) * .004 * (G.v / MAXV) + (G.scrape ? (hr(G.simT * 50) - .5) * .02 : 0);
   for (const w of car.wheels) { w.spin.rotation.x += G.v * dt / WR; if (w.front) w.wg.rotation.y = -G.steer * .32; }
   const k = sstep(0, 1, G.lightsK);
@@ -923,7 +926,7 @@ function drawHUD(o) {
   const x = hx, w = hud.width, h = hud.height, u = Math.min(w / 1920, h / 1080) * (w < h ? 1.7 : 1);
   x.clearRect(0, 0, w, h);
   if (G.photo) return;
-  speedLines(x, w, h, (sstep(58, 86, G.v) + G.boostK * .8) * (o.lines ?? 1), Math.floor(G.simT * 15) % 50);
+  speedLines(x, w, h, (CAP ? sstep(58, 86, G.v) + G.boostK * .8 : sstep(.82 * MAXV, MAXV, G.v) * .45 + G.boostK * .5) * (o.lines ?? 1), Math.floor(G.simT * 15) % 50);
   const ink = '#2A1238';
   const titleText = (X, Y, fs, align) => { x.save(); x.textAlign = align; x.font = `900 italic ${fs}px ${FONT}`; x.lineJoin = 'round';
     x.fillStyle = '#FF3B6B'; x.fillText('AFTERGLOW', X + fs * .05, Y + fs * .05);
@@ -991,7 +994,7 @@ function drawHUD(o) {
 
 // ---------- frame ----------
 function render(night, o = {}) {
-  postMat.uniforms.uTime.value = G.simT; postMat.uniforms.uSpd.value = Math.min(1.6, sstep(50, 90, G.v) + G.boostK * .6); postMat.uniforms.uImp.value = G.imp > .5 ? 1 : 0; postMat.uniforms.uFade.value = o.fade || 0; postMat.uniforms.uRain.value = G.rain;
+  postMat.uniforms.uTime.value = G.simT; postMat.uniforms.uSpd.value = CAP ? Math.min(1.6, sstep(50, 90, G.v) + G.boostK * .6) : sstep(.75 * MAXV, MAXV_B, G.v) * .6 + G.boostK * .4; postMat.uniforms.uImp.value = G.imp > .5 ? 1 : 0; postMat.uniforms.uFade.value = o.fade || 0; postMat.uniforms.uRain.value = G.rain;
   renderer.setRenderTarget(rt); renderer.render(scene, camera); renderer.setRenderTarget(null); renderer.render(postScene, postCam);
   drawHUD(o);
 }
