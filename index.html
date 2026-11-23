@@ -1047,12 +1047,12 @@ for (let i = 0; i < 30; i++) { step(1 / 60); }
 updateChunks(G.s, true);
 if (CAP) { G.simT = 1e9; capFrame(0); window.__ready = true; }
 else {
-  let last = performance.now(), acc = 0, fpsA = 60, slow = 0; const FT = [];
+  let last = performance.now(), acc = 0, fpsA = 60, slow = 0; const FT = [], BOOT = performance.now();
   const loop = now => {
     let dt = Math.min(.1, Math.max(0, (now - last) / 1000)); last = now; if (!isFinite(dt)) dt = 0;
     fpsA = lerp(fpsA, dt > 0 ? 1 / dt : 60, .05);
     // adaptive resolution: if more than 8% of frames miss the display's refresh over 2 s, drop render scale by 15%
-    if (!CAP && dt > 0) { FT.push(dt); if (FT.length >= 180) { const so = [...FT].sort((a, b) => a - b), med = so[FT.length >> 1], late = FT.filter(x => x > med * 1.45).length / FT.length;
+    if (!CAP && dt > 0 && now - BOOT > 5000) { FT.push(dt); if (FT.length >= 180) { const so = [...FT].sort((a, b) => a - b), med = so[FT.length >> 1], late = FT.filter(x => x > med * 1.45).length / FT.length;
       if (late > .08 && DPRMAX > .75) { DPRMAX = Math.max(.75, DPR * .85); resize(); } FT.length = 0; } }
     if (!G.photo) { const ns = Math.max(1, Math.ceil(dt * 60 - 1e-6)); for (let i = 0; i < ns; i++) step(dt / ns); }
     updateSound(!!(K.ArrowUp || K.KeyW || (TOUCH && !touchBrake)) || G.boost, dt);
