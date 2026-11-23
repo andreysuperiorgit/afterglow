@@ -84,7 +84,8 @@ let rnd = mulberry(86);
 // ---------- renderer ----------
 const canvas = document.getElementById('gl');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: CAP });
-let DPR = CAP ? 1 : Math.min(devicePixelRatio || 1, TOUCH ? 1.5 : 1.75);
+let DPRMAX = CAP ? 1 : Math.min(devicePixelRatio || 1, TOUCH ? 1.5 : 1.75), DPR = DPRMAX;
+const PIX_BUDGET = TOUCH ? 1.6e6 : 2.4e6;  // rendered pixels per frame: keeps 120 Hz screens on time
 renderer.setPixelRatio(DPR);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
 const scene = new THREE.Scene();
@@ -124,6 +125,7 @@ const postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const hud = document.getElementById('hud'), hx = hud.getContext('2d');
 let VW = 1, VH = 1;
 function resize() {
+  if (!CAP) DPR = Math.max(.7, Math.min(DPRMAX, Math.sqrt(PIX_BUDGET / (innerWidth * innerHeight))));
   VW = CAP ? CW : innerWidth; VH = CAP ? CH_ : innerHeight;
   renderer.setPixelRatio(DPR); renderer.setSize(VW, VH, CAP);
   rt.setSize(Math.round(VW * DPR), Math.round(VH * DPR)); postMat.uniforms.uRes.value.set(VW * DPR, VH * DPR);
@@ -664,7 +666,7 @@ function bandW(list, rpm) { // equal-power crossfade weights between neighbourin
   const w = list.map(() => 0); if (rpm <= list[0][1]) { w[0] = 1; return w; } if (rpm >= list[list.length - 1][1]) { w[list.length - 1] = 1; return w; }
   for (let i = 0; i < list.length - 1; i++) if (rpm <= list[i + 1][1]) { const u = (rpm - list[i][1]) / (list[i + 1][1] - list[i][1]); w[i] = Math.cos(u * Math.PI / 2); w[i + 1] = Math.sin(u * Math.PI / 2); break; } return w; }
 function initSound() { if (CAP) return;
-  if (AC) { AC.resume(); if (SND) { SND.startT = AC.currentTime - 2; oneShot('rev', .7, .95); } return; }
+  if (AC) { AC.resume(); if (SND) oneShot('rev', .35, 1); return; }
   try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
   const N = (t, o = {}) => { const n = t === 'g' ? AC.createGain() : AC.createBiquadFilter(); if (t !== 'g') n.type = t; for (const k in o) (n[k].value !== undefined ? n[k].value = o[k] : n[k] = o[k]); return n; };
   const comp = N('g', { gain: 1 });  // no bus compressor: Chrome's compressor pumps in time with the grains and clicks
@@ -677,16 +679,17 @@ function initSound() { if (CAP) return;
   const offLp = N('lowpass', { frequency: 1500, Q: .6 }); off.connect(offLp);
   const eng = N('g', { gain: 0 }); const hpf = N('highpass', { frequency: 42, Q: .7 }); [onLs, offLp, idle].forEach(n => n.connect(hpf)); hpf.connect(ls); ls.connect(pk); pk.connect(hs); hs.connect(lp); lp.connect(eng); eng.connect(master);
   const mg = AC.createChannelMerger(2), refl = N('g', { gain: .22 }), rlp = N('lowpass', { frequency: 3200 });
-  const dL = AC.createDelay(.1), dR = AC.createDelay(.1); dL.delayTime.value = .021; dR.delayTime.value = .033; eng.connect(rlp); rlp.connect(dL); rlp.connect(dR); dL.connect(mg, 0, 0); dR.connect(mg, 0, 1); mg.connect(refl); refl.connect(master);
-  const fx = N('g', { gain: .95 }); fx.connect(master); const tr = N('g', { gain: .6 }); tr.connect(master); const amb = N('g', { gain: 1 }); amb.connect(master);
-  SND = { comp, lim, master, eng, on, off, idle, amb, loops: {}, cc: 0, ls, pk, hs, lp, fx, tr, refl, L: [], P: [], buf: {}, bank: null, gear: 0, lives: G.lives, boost: false, startT: 1e9, shiftT: -9, crashT: -9, liftT: -9, load: 0, rpm: 1100, nextT: 0, gas: false };
+  const dL = AC.createDelay(.1), dR = AC.createDelay(.1); dL.delayTime.value = .021; dR.delayTime.value = .033; // barrier reflections removed: 20-30 ms slapback made the engine sound phasey dL.connect(mg, 0, 0); dR.connect(mg, 0, 1); mg.connect(refl); refl.connect(master);
+  const fx = N('g', { gain: .95 }); fx.connect(master); const tr = N('g', { gain: 0 }); tr.connect(master); const amb = N('g', { gain: 1 }); amb.connect(master);
+  SND = { startT: -9, comp, lim, master, eng, on, off, idle, amb, loops: {}, cc: 0, ls, pk, hs, lp, fx, tr, refl, L: [], P: [], buf: {}, bank: null, gear: 0, lives: G.lives, boost: false, shiftT: -9, crashT: -9, liftT: -9, load: 0, rpm: 1100, nextT: 0, gas: false };
   SMP.forEach(([b64, len, ref], i) => { if (i !== 0) return; AC.decodeAudioData(b64buf(b64), buf => { const sc = loopSrc(buf, len); sc.connect(idle); sc.start(0, SPAD); SND.L.push({ src: sc, ref });
       for (let k = 0; k < 3; k++) { const v = { s: loopSrc(buf, len), f: N('lowpass', { frequency: 700 }), g: N('g', { gain: 0 }), p: AC.createStereoPanner ? AC.createStereoPanner() : null, car: null, lastD: 0 };
         v.s.connect(v.f); v.f.connect(v.g); if (v.p) { v.g.connect(v.p); v.p.connect(tr); } else v.g.connect(tr); v.s.start(0, SPAD + k * .73); SND.P.push(v); } }, () => {}); });
   AC.decodeAudioData(b64buf(BANK), buf => { SND.bank = buf; SND.E = {};
     for (const [k, ref] of [...ENG_ON, ...ENG_OFF]) { const [a, L] = TIDX[k], sc = AC.createBufferSource(), g = N('g', { gain: 0 }); sc.buffer = buf; sc.loop = true; sc.loopStart = a; sc.loopEnd = a + L;
-      sc.connect(g); g.connect(k.startsWith('on') ? on : off); sc.start(0, a + Math.random() * L * .9); SND.E[k] = { sc, g, ref }; } }, () => {});
-  for (const k in SFX) AC.decodeAudioData(b64buf(SFX[k]), buf => { SND.buf[k] = buf; if (k === 'start') { SND.startT = AC.currentTime; oneShot('start', 1); }
+      sc.connect(g); g.connect(k.startsWith('on') ? on : off); sc.start(0, a + Math.random() * L * .9); SND.E[k] = { sc, g, ref }; }
+    SND.Eoff = {}; for (const [k, ref] of ENG_ON) { const [a, L] = TIDX[k], sc = AC.createBufferSource(), g = N('g', { gain: 0 }); sc.buffer = buf; sc.loop = true; sc.loopStart = a; sc.loopEnd = a + L; sc.connect(g); g.connect(off); sc.start(0, a + Math.random() * L * .9); SND.Eoff[k] = { sc, g, ref }; } }, () => {});
+  for (const k in SFX) AC.decodeAudioData(b64buf(SFX[k]), buf => { SND.buf[k] = buf; if (k === 'rev') oneShot('rev', .35, 1);
     if (FXL[k]) { const sc = AC.createBufferSource(), g = N('g', { gain: 0 }); sc.buffer = buf; sc.loop = true; sc.loopStart = 0; sc.loopEnd = FXL[k]; sc.connect(g); g.connect(k === 'squeal' ? SND.fx : SND.amb); sc.start(0, Math.random() * FXL[k] * .9); SND.loops[k] = { sc, g }; } }, () => {});
 }
 const GEARS = [0, 62, 108, 155, 205, 262, 999], RPM_LO = 3400, RPM_HI = 6000;
@@ -705,7 +708,8 @@ function updateSound(gasOn, dt) { if (!SND) return; const t = AC.currentTime, km
   // engine loops: rpm picks the loops (equal-power crossfade), load picks on-throttle vs overrun
   if (SND.E) { const ga = 1 - idleK, wOn = bandW(ENG_ON, R), wOff = bandW(ENG_OFF, R * .98);
     ENG_ON.forEach(([k], i) => { const e = SND.E[k]; e.sc.playbackRate.setTargetAtTime(clamp(R / e.ref, .55, 1.6), t, .04); e.g.gain.setTargetAtTime(wOn[i] * ld * ga, t, .05); });
-    ENG_OFF.forEach(([k], i) => { const e = SND.E[k]; e.sc.playbackRate.setTargetAtTime(clamp(R * .98 / e.ref, .55, 1.6), t, .04); e.g.gain.setTargetAtTime(wOff[i] * (1 - ld) * (.5 + .4 * lift) * ga, t, .06); }); }
+    ENG_OFF.forEach(([k], i) => { const e = SND.E[k]; e.sc.playbackRate.setTargetAtTime(clamp(R * .98 / e.ref, .55, 1.6), t, .04); e.g.gain.setTargetAtTime(wOff[i] * (1 - ld) * (.22 + .2 * lift) * ga, t, .06); });
+    if (SND.Eoff) ENG_ON.forEach(([k], i) => { const e = SND.Eoff[k]; e.sc.playbackRate.setTargetAtTime(clamp(R * .98 / e.ref, .55, 1.6), t, .04); e.g.gain.setTargetAtTime(wOn[i] * (1 - ld) * .42 * ga, t, .06); }); }
   SND.on.gain.setTargetAtTime(1, t, .05); SND.off.gain.setTargetAtTime(1, t, .05);
   SND.L.forEach(o => { o.src.playbackRate.setTargetAtTime(clamp(R / o.ref, .7, 1.9), t, .05); }); SND.idle.gain.setTargetAtTime(idleK * .9, t, .08);
   // camera mix: chase = exhaust (bass), hood = intake (mids, air), cinematic / over / photo = distant
@@ -713,9 +717,9 @@ function updateSound(gasOn, dt) { if (!SND) return; const t = AC.currentTime, km
   const eq = cam === 0 ? [1, 1, 1, 10000, 1] : cam === 1 ? [-3, 4, 3, 12000, 1] : [0, -2, -7, 2600, .55];
   SND.ls.gain.setTargetAtTime(eq[0] + G.boostK * .5, t, .1); SND.pk.gain.setTargetAtTime(eq[1], t, .1); SND.hs.gain.setTargetAtTime(eq[2] + ld * 1.5, t, .1);
   SND.lp.frequency.setTargetAtTime(crash > 0 ? 260 + (1 - crash) * 2500 : eq[3] * (.55 + .45 * ld) + G.boostK * 3000, t, crash > 0 ? .02 : .08);
-  const startK = clamp((t - SND.startT - .9) / .6, 0, 1);
+  const startK = 1;
   SND.eng.gain.setTargetAtTime((play ? .62 + .18 * ld : .3) * eq[4] * startK * (1 - shift * .6), t, shift > 0 ? .012 : .05);
-  SND.refl.gain.setTargetAtTime(cam === 2 ? .1 : .22, t, .2);
+  
   SND.master.gain.setTargetAtTime(on ? 1 : 0, t, .1);
   if (window.__mix) {  SND.tr.gain.value = window.__mix.tr; SND.eng.gain.cancelScheduledValues(t); SND.eng.gain.value = window.__mix.eng * .8; }
   // ambience and one-shots: wind grows with speed, rain in NEON BAY, tyre squeal on the barrier, crash, close-call fly-by
@@ -724,8 +728,9 @@ function updateSound(gasOn, dt) { if (!SND) return; const t = AC.currentTime, km
   if (Lp.rain) Lp.rain.g.gain.setTargetAtTime(G.rain * .55, t, .4);
   if (Lp.squeal) Lp.squeal.g.gain.setTargetAtTime(play ? Math.min(1, G.scrape) * .55 + crash * .3 : 0, t, .05);
   if (crash > .98 && !SND.crashPlayed) { oneShot('crash', 1); oneShot('screech', .55); SND.crashPlayed = true; } if (crash < .5) SND.crashPlayed = false;
-  if (G.st && G.st.cc > SND.cc && G.ccCar) { _cv.copy(G.ccCar.g.position).sub(camera.position); _cr.setFromMatrixColumn(camera.matrixWorld, 0); oneShot('pass', .8, .95 + Math.random() * .1, clamp(_cv.dot(_cr) / (_cv.length() + 2) * 2.2, -.9, .9)); }
-  if (G.st) SND.cc = G.st.cc;
+  if ((G.passN || 0) > (SND.passN || 0) && G.passCar) { _cv.copy(G.passCar.g.position).sub(camera.position); _cr.setFromMatrixColumn(camera.matrixWorld, 0);
+    oneShot('pass', .85 * clamp(1.3 - G.passAd / 6, .25, 1), (G.passCar.van ? .85 : .97) + Math.random() * .08, clamp(_cv.dot(_cr) / (_cv.length() + 2) * 2.2, -.9, .9)); }
+  SND.passN = G.passN || 0;
   // traffic pass-bys: nearest cars get a voice (doppler pitch, distance level, stereo position)
   const cands = []; for (const c of traffic) { if (!c.on || !c.g.visible) continue; const d = c.g.position.distanceTo(camera.position); if (d < 80) cands.push({ c, d }); }
   cands.sort((a, b) => a.d - b.d); _cr.setFromMatrixColumn(camera.matrixWorld, 0);
@@ -797,7 +802,7 @@ function step(dt) {
       if (playing && G.crashT <= 0) { G.lives--; G.combo = 0; G.comboT = 0; G.crashT = 1.6; G.shake = 1; G.imp = 1; G.v = Math.min(G.v, c.v * .55); G.pops.push({ t: 0, txt: 'CRASH', sub: G.lives > 0 ? `${G.lives} left` : '', red: true }); if (G.lives <= 0) endRun(); }
       else { G.v = Math.min(G.v, c.v * .8); }
     }
-    if (!c.passed && rel > 0) { c.passed = true;
+    if (!c.passed && rel > 0) { c.passed = true; if (playing && ad < 6) { G.passN = (G.passN || 0) + 1; G.passCar = c; G.passAd = ad; }
       if (playing && !c.hit && ad < 3.1 && G.v - c.v > 8) { G.combo++; G.comboT = 3.2; const pts = 250 * G.combo * (G.boost ? 2 : 1); G.st.cc++; G.ccCar = c; G.st.maxCombo = Math.max(G.st.maxCombo, G.combo); if (!CAP) G.nitro = Math.min(1, G.nitro + .2 + .04 * G.combo); G.score += pts; G.pops.push({ t: 0, txt: (G.boost ? 'NITRO ' : '') + (G.combo > 1 ? `CLOSE CALL ×${G.combo}` : 'CLOSE CALL'), sub: `+${pts} PTS`, src: !!c.forced }); } }
     if (c.s < G.s - 70 || c.s > G.s + 1300) c.on = false;
   }
@@ -1042,12 +1047,14 @@ for (let i = 0; i < 30; i++) { step(1 / 60); }
 updateChunks(G.s, true);
 if (CAP) { G.simT = 1e9; capFrame(0); window.__ready = true; }
 else {
-  let last = performance.now(), acc = 0, fpsA = 60, slow = 0;
+  let last = performance.now(), acc = 0, fpsA = 60, slow = 0; const FT = [];
   const loop = now => {
     let dt = Math.min(.1, Math.max(0, (now - last) / 1000)); last = now; if (!isFinite(dt)) dt = 0;
     fpsA = lerp(fpsA, dt > 0 ? 1 / dt : 60, .05);
-    if (fpsA < 38 && DPR > 1) { if ((slow += dt) > 3) { DPR = 1; resize(); slow = 0; } } else slow = 0;
-    acc += dt; let n = 0; if (G.photo) acc = 0; else { while (acc >= 1 / 60 && n < 6) { step(1 / 60); acc -= 1 / 60; n++; } if (n === 6) acc = 0; }
+    // adaptive resolution: if more than 8% of frames miss the display's refresh over 2 s, drop render scale by 15%
+    if (!CAP && dt > 0) { FT.push(dt); if (FT.length >= 180) { const so = [...FT].sort((a, b) => a - b), med = so[FT.length >> 1], late = FT.filter(x => x > med * 1.45).length / FT.length;
+      if (late > .08 && DPRMAX > .75) { DPRMAX = Math.max(.75, DPR * .85); resize(); } FT.length = 0; } }
+    if (!G.photo) { const ns = Math.max(1, Math.ceil(dt * 60 - 1e-6)); for (let i = 0; i < ns; i++) step(dt / ns); }
     updateSound(!!(K.ArrowUp || K.KeyW || (TOUCH && !touchBrake)) || G.boost, dt);
     G.tod = todForRun();
     updateChunks(G.s, false);
